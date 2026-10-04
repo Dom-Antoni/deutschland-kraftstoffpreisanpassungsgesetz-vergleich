@@ -1,0 +1,573 @@
+---
+title: "Synthetische Preisvergleiche: Deutschland und Österreich"
+output: md_document
+---
+
+Dieses Dokument erzeugt die acht PNG-Grafiken in `plots/` aus der beiliegenden Monatspreistabelle. Es werden Nettopreise für Super 95 und Diesel in EUR/Liter verwendet. Der synthetische Vergleich eines Monats ist die gewichtete Summe der zeitgleichen Preise anderer Länder. Die Gewichte werden ausschließlich mit Preisen vor dem jeweiligen Einschnitt geschätzt.
+
+```{r setup, include=FALSE}
+# R unter Windows braucht hier eine UTF-8-Locale für die deutschen Plottexte.
+if (.Platform$OS.type == "windows" && !l10n_info()[["UTF-8"]]) {
+  for (candidate in c("English_United States.utf8",
+                      "German_Germany.utf8", "C.UTF-8")) {
+    suppressWarnings(Sys.setlocale("LC_CTYPE", candidate))
+    if (l10n_info()[["UTF-8"]]) break
+  }
+  if (!l10n_info()[["UTF-8"]]) {
+    stop("Eine UTF-8-Locale ist für die Plotbeschriftungen erforderlich.")
+  }
+}
+# Eine frische R-Installation hat die Analysepakete eventuell noch nicht.
+# Fehlende Pakete werden in der persönlichen Bibliothek installiert.
+needed <- c("knitr", "dplyr", "tidyr", "readr", "ggplot2", "Synth")
+user_lib <- Sys.getenv("R_LIBS_USER")
+if (!nzchar(user_lib)) {
+  user_lib <- file.path(path.expand("~"), "R", "library")
+}
+if (!dir.exists(user_lib)) dir.create(user_lib, recursive=TRUE)
+.libPaths(c(user_lib, .libPaths()))
+missing <- needed[!vapply(needed, requireNamespace, logical(1), quietly=TRUE)]
+if (length(missing)) {
+  install.packages(missing, lib=user_lib,
+                   repos="https://cloud.r-project.org")
+}
+still_missing <- needed[!vapply(needed, requireNamespace, logical(1),
+                                quietly=TRUE)]
+if (length(still_missing)) {
+  stop("R-Pakete fehlen: ", paste(still_missing, collapse=", "),
+       ". Bitte Installation und Internetverbindung prüfen.")
+}
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE,
+                      results="hide", fig.width=12, fig.height=7,
+                      fig.path="chunk_figures/")
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(readr)
+  library(ggplot2)
+  library(Synth)
+})
+dir.create("plots", showWarnings=FALSE)
+preise <- read_csv("preise_monatlich.csv", show_col_types=FALSE,
+                  na=c("", "NA"), locale=locale(encoding="UTF-8")) |>
+  mutate(monat=as.Date(monat))
+stopifnot(nrow(preise) == 9360L,
+          !anyDuplicated(preise[c("monat", "iso2", "kraftstoff")]),
+          setequal(unique(preise$kraftstoff), c("Super 95", "Diesel")),
+          all(preise$netto_eur_l[!is.na(preise$netto_eur_l)] > 0))
+fuels <- c("Super 95", "Diesel")
+ink <- "#17324D"
+blue <- "#24658A"
+orange <- "#D35D3B"
+teal <- "#238477"
+social_theme <- theme_minimal(base_size=15) +
+  theme(plot.title.position="plot",
+        plot.title=element_text(face="bold",size=20,colour=ink,
+                                margin=margin(b=6)),
+        plot.subtitle=element_text(size=12.5,colour="#394B5B",
+                                   margin=margin(b=13)),
+        plot.caption=element_text(size=10,colour="#53616D",hjust=0,
+                                  margin=margin(t=14)),
+        axis.title=element_text(size=12,colour=ink),
+        axis.text=element_text(size=11,colour="#425160"),
+        strip.text=element_text(face="bold",size=13,colour=ink),
+        panel.grid.minor=element_blank(),
+        panel.grid.major.x=element_blank(),
+        legend.position="bottom",legend.title=element_blank(),
+        legend.text=element_text(size=11),
+        plot.margin=margin(16,18,15,18))
+
+# X = Preis-Mittel in den angegebenen Trainingsabschnitten.
+# Z = alle Monatspreise im Training. Synth optimiert die Ländergewichte W
+# und die Gewichte V der X-Merkmale, mit W >= 0 und Summe(W) = 1.
+fit_synth <- function(treated, donors, fuel, first_month, train_end,
+                      last_month, predictor_periods) {
+  months <- seq(as.Date(first_month), as.Date(last_month), by="month")
+  units <- c(treated, donors)
+  panel <- preise |>
+    filter(kraftstoff == fuel, iso2 %in% units, monat %in% months) |>
+    select(monat, iso2, netto_eur_l) |>
+    pivot_wider(names_from=iso2, values_from=netto_eur_l) |>
+    arrange(monat)
+  stopifnot(nrow(panel) == length(months), identical(panel$monat, months),
+            !anyNA(panel[units]))
+  Y <- as.matrix(panel[, units])
+  train <- panel$monat <= as.Date(train_end)
+  X <- do.call(rbind, lapply(predictor_periods, function(period) {
+    in_period <- panel$monat >= as.Date(period[1]) &
+      panel$monat <= as.Date(period[2])
+    stopifnot(all(in_period <= train), any(in_period))
+    colMeans(Y[in_period, , drop=FALSE])
+  }))
+  rownames(X) <- names(predictor_periods)
+  colnames(X) <- units
+  fit <- Synth::synth(X1=X[, treated, drop=FALSE],
+                      X0=X[, donors, drop=FALSE],
+                      Z1=Y[train, treated, drop=FALSE],
+                      Z0=Y[train, donors, drop=FALSE],
+                      optimxmethod=c("Nelder-Mead", "BFGS"),
+                      genoud=FALSE, verbose=FALSE)
+  w <- setNames(as.numeric(fit$solution.w), donors)
+  stopifnot(all(is.finite(w)), min(w) >= -1e-5,
+            abs(sum(w)-1) < 1e-4)
+  actual <- Y[, treated]
+  synthetic <- drop(Y[, donors, drop=FALSE] %*% w)
+  rmse <- sqrt(mean((actual[train]-synthetic[train])^2))
+  stopifnot(abs(rmse^2-as.numeric(fit$loss.v)) < 1e-7)
+  list(weights=w, rmse=rmse, v=as.numeric(fit$solution.v),
+       path=tibble(kraftstoff=fuel, monat=panel$monat,
+                   actual=actual, synthetic=synthetic,
+                   gap=actual-synthetic))
+}
+
+annual_periods <- function(first_year, last_year) {
+  years <- first_year:last_year
+  setNames(lapply(years, function(y) {
+    c(sprintf("%d-01-01", y), sprintf("%d-12-01", y))
+  }), as.character(years))
+}
+```
+
+## Deutschland: Gewichte bis März 2026
+
+Deutschland: Training Januar 2019 bis März 2026. Der vorläufige Pool umfasst Bulgarien, Zypern, Estland, Spanien, Finnland, Irland, Lettland, Litauen, Niederlande, Portugal und Schweden. Die Poolauswahl ist keine vollständige Prüfung aller möglichen Eingriffe.
+
+```{r deutschland-gewichte}
+de_donors <- c("BG", "CY", "EE", "ES", "FI", "IE", "LV", "LT",
+               "NL", "PT", "SE")
+de_periods <- c(annual_periods(2019, 2025),
+                list(`2026_Q1`=c("2026-01-01", "2026-03-01")))
+de_main <- setNames(lapply(fuels, function(fuel) {
+  fit_synth("DE", de_donors, fuel, "2019-01-01", "2026-03-01",
+            "2026-09-01", de_periods)
+}), fuels)
+de_weights <- bind_rows(lapply(fuels, function(fuel) {
+  tibble(kraftstoff=fuel, iso2=de_donors,
+         land=preise$land[match(de_donors, preise$iso2)],
+         gewicht=unname(de_main[[fuel]]$weights[de_donors]),
+         prozent=100*gewicht)
+}))
+stopifnot(abs(de_main[["Super 95"]]$rmse*100-3.26697505) < 0.01,
+          abs(de_main[["Diesel"]]$rmse*100-4.19823139) < 0.01)
+
+de_order <- de_weights |>
+  group_by(iso2, land) |>
+  summarise(max_prozent=max(prozent), .groups="drop") |>
+  arrange(desc(max_prozent), land)
+de_plot_data <- de_weights |>
+  mutate(land=factor(land, levels=de_order$land),
+         label=case_when(
+           prozent >= 8 ~ paste0(land, "\n", sprintf("%.1f", prozent), " %"),
+           prozent >= 2 ~ paste0(sprintf("%.1f", prozent), " %"),
+           TRUE ~ ""))
+de_shown <- de_weights |> filter(prozent >= 0.05) |>
+  distinct(land) |> pull(land) |> as.character()
+de_palette <- setNames(grDevices::hcl.colors(length(levels(de_plot_data$land)),
+                                          "Set 3"), levels(de_plot_data$land))
+de_weight_chart <- ggplot(de_plot_data,
+                          aes(x=kraftstoff, y=prozent, fill=land)) +
+  geom_col(width=0.55) +
+  geom_text(aes(label=label), position=position_stack(vjust=0.5),
+            size=3.4, lineheight=0.9, colour="#202020") +
+  coord_flip() +
+  scale_y_continuous(limits=c(0,100.01), breaks=seq(0,100,20),
+                     expand=expansion(mult=c(0,0))) +
+  scale_fill_manual(values=de_palette, breaks=de_shown, drop=TRUE) +
+labs(title="Ländergewichte des synthetischen Deutschlands nach Kraftstoff",
+       subtitle="Gewichtsschätzung mit Nettopreisen von Januar 2019 bis März 2026",
+       x=NULL, y="Gewicht am Vergleichspreis (%)", fill="Land",
+       caption="Gewichte am synthetischen Nettopreis, keine Marktanteile. 11 vorläufige Vergleichsländer; keine Wirkungsanalyse.") +
+  social_theme +
+  theme(panel.grid.major.y=element_blank(), panel.grid.minor=element_blank(),
+        legend.text=element_text(size=10)) +
+  guides(fill=guide_legend(nrow=2, byrow=TRUE,
+                           override.aes=list(linewidth=0)))
+ggsave("plots/DE_01_laendergewichte_stacked.png", de_weight_chart,
+       width=12, height=6.3, dpi=180, bg="white")
+print(de_weight_chart)
+```
+
+## Deutschland: zurückgehaltene Preise
+
+Ein zweites Modell lernt nur 2019–2024. Die deutschen Preise von Januar 2025 bis März 2026 sind für seine Gewichtsschätzung verborgen; die zeitgleichen Vergleichspreise sind bekannt. Das ist ein zeitlicher Test, keine Prognose ohne aktuelle Länderdaten.
+
+```{r deutschland-test}
+de_test_donors <- sort(de_donors)
+de_holdout <- setNames(lapply(fuels, function(fuel) {
+  fit_synth("DE", de_test_donors, fuel, "2019-01-01", "2024-12-01",
+            "2026-03-01", annual_periods(2019,2024))
+}), fuels)
+de_test_path <- bind_rows(lapply(de_holdout, `[[`, "path"))
+de_test_metrics <- tibble(kraftstoff=fuels,
+  test_rmse_eur_l=vapply(fuels, function(fuel) {
+    p <- de_holdout[[fuel]]$path |>
+      filter(monat >= as.Date("2025-01-01"))
+    sqrt(mean(p$gap^2))
+  }, numeric(1)))
+stopifnot(abs(de_test_metrics$test_rmse_eur_l[1]*100-2.83) < 0.01,
+          abs(de_test_metrics$test_rmse_eur_l[2]*100-4.25) < 0.01)
+de_test_long <- de_test_path |>
+  select(kraftstoff, monat, actual, synthetic) |>
+  pivot_longer(cols=c(actual,synthetic), names_to="reihe",
+               values_to="preis_eur_l") |>
+  mutate(reihe=factor(reihe, levels=c("actual","synthetic"),
+                      labels=c("Deutschland: beobachtet",
+                               "Synthetischer Vergleich")),
+         kraftstoff=factor(kraftstoff, levels=fuels))
+de_panel_titles <- setNames(
+  paste0(de_test_metrics$kraftstoff, " | Test-RMSE ",
+         sprintf("%.2f",100*de_test_metrics$test_rmse_eur_l), " Cent/L"),
+  de_test_metrics$kraftstoff)
+de_shade <- tibble(kraftstoff=factor(fuels,levels=fuels),
+                   xmin=as.Date("2025-01-01"),
+                   xmax=as.Date("2026-04-01"))
+de_test_chart <- ggplot(de_test_long,
+                        aes(x=monat,y=preis_eur_l,
+                            color=reihe,linetype=reihe)) +
+  geom_rect(data=de_shade,inherit.aes=FALSE,
+            aes(xmin=xmin,xmax=xmax,ymin=-Inf,ymax=Inf),
+            fill="#dce9f6",alpha=0.7) +
+  geom_vline(xintercept=as.Date("2025-01-01"),
+             color="#68747f",linewidth=0.5,linetype="dotted") +
+  geom_line(linewidth=0.8) +
+  facet_wrap(~kraftstoff,ncol=1,
+             labeller=labeller(kraftstoff=de_panel_titles),
+             strip.position="top") +
+  scale_color_manual(values=c("Deutschland: beobachtet"=blue,
+                              "Synthetischer Vergleich"=orange)) +
+  scale_linetype_manual(values=c("Deutschland: beobachtet"="solid",
+                                 "Synthetischer Vergleich"="dashed")) +
+  scale_x_date(date_breaks="1 year",date_labels="%Y",
+               limits=c(as.Date("2019-01-01"),as.Date("2026-04-01")),
+               expand=expansion(mult=c(0,0))) +
+  labs(title="Modelltest: Deutschland und synthetischer Vergleich",
+       subtitle="Training 2019–2024 · Test Januar 2025 bis März 2026 blau hinterlegt · RMSE je Kraftstoff",
+       x=NULL,y="Nettopreis (EUR/Liter)",color=NULL,linetype=NULL,
+       caption="Training 2019–2024. Testpreise nicht zur Gewichtsschätzung verwendet; zeitgleiche Länderpreise schon.\nBereits vor April 2026 keine perfekte Passung; der Abstand danach ist daher nicht automatisch ein Regeleffekt.") +
+  social_theme
+ggsave("plots/DE_02_holdout_preisvergleich.png",de_test_chart,
+       width=12,height=8,dpi=180,bg="white")
+print(de_test_chart)
+```
+
+## Deutschland: beobachtet gegen synthetisch
+
+Für den Vergleich ab April 2026 werden die bis März 2026 geschätzten Gewichte nicht verändert. Die September-Monatswerte enthalten alle vier EU-Montagstermine bis 28. September.
+
+```{r deutschland-preisvergleich}
+de_path <- bind_rows(lapply(de_main, `[[`, "path")) |>
+  filter(monat >= as.Date("2025-01-01"))
+stopifnot(nrow(de_path)==42L,
+          all(preise$monatsstatus[preise$iso2=="DE" &
+              preise$monat==as.Date("2026-09-01")] == "Abgeschlossen"),
+          all(preise$wochen_netto[preise$iso2=="DE" &
+              preise$monat==as.Date("2026-09-01")] == 4))
+de_long <- de_path |>
+  select(kraftstoff,monat,actual,synthetic) |>
+  pivot_longer(c(actual,synthetic),names_to="reihe",
+               values_to="preis_eur_l") |>
+  mutate(reihe=factor(reihe,levels=c("actual","synthetic"),
+                      labels=c("Deutschland","Synthetisches Deutschland")),
+         kraftstoff=factor(kraftstoff,levels=fuels))
+de_price_chart <- ggplot(de_long,
+                         aes(x=monat,y=preis_eur_l,
+                             color=reihe,linetype=reihe)) +
+  geom_vline(xintercept=as.Date("2026-04-01"),
+             color="#727d87",linewidth=0.55,linetype="dotted") +
+  geom_line(linewidth=0.9) +
+  facet_wrap(~kraftstoff,ncol=1,scales="free_y") +
+  scale_color_manual(values=c("Deutschland"=blue,
+                              "Synthetisches Deutschland"=orange)) +
+  scale_linetype_manual(values=c("Deutschland"="solid",
+                                 "Synthetisches Deutschland"="dashed")) +
+  scale_x_date(date_breaks="3 months",date_labels="%m/%Y",
+               limits=c(as.Date("2025-01-01"),as.Date("2026-09-20")),
+               expand=expansion(mult=c(0.01,0.01))) +
+  scale_y_continuous(labels=function(x) sprintf("%.2f",x)) +
+  labs(title="Nettopreise: Deutschland und synthetischer Vergleich, 2025–2026",
+       subtitle="Monatsmittel für Super 95 und Diesel · Vertikale Linie: 1. April 2026",
+       x=NULL,y="Nettopreis (EUR/Liter)",color=NULL,linetype=NULL,
+       caption=paste(
+         "Gewichte aus dem Training bis März 2026; September enthält vier Montagstermine.",
+         "Nach dem Preishügel liegt Super 95 im Juli leicht unter, ab August über dem Vergleich.",
+         "Auch vor der Regel gab es Modellabweichungen. Die Differenz belegt keine kausale Regelwirkung.",
+         sep="\n")) +
+  social_theme +
+  theme(plot.caption=element_text(hjust=0,size=9.5),
+        axis.text.x=element_text(angle=35,hjust=1))
+ggsave("plots/DE_03_deutschland_vs_synthetisch_2025_2026.png",
+       de_price_chart,width=12,height=8.5,dpi=180,bg="white")
+print(de_price_chart)
+```
+
+Der folgende Zusatzplot zeigt den vorzeichenbehafteten monatlichen Abstand für Juli bis September 2026, also nach dem Frühjahrs-Preishügel. Ein positiver Wert bedeutet: Deutschland lag über dem synthetischen Vergleich.
+
+```{r deutschland-monatsabstand}
+de_completed <- de_path |>
+  filter(monat>=as.Date("2026-07-01"),
+         monat<=as.Date("2026-09-01")) |>
+  mutate(differenz_cent_l=100*gap)
+stopifnot(nrow(de_completed)==6L)
+de_gap_summary <- de_completed |>
+  group_by(kraftstoff) |>
+  summarise(durchschnitt_cent_pro_l=mean(differenz_cent_l),.groups="drop")
+stopifnot(abs(de_gap_summary$durchschnitt_cent_pro_l[
+  de_gap_summary$kraftstoff=="Super 95"]-2.53857648)<0.01,
+  abs(de_gap_summary$durchschnitt_cent_pro_l[
+  de_gap_summary$kraftstoff=="Diesel"]-4.54524572)<0.01)
+de_gap_data <- de_completed |>
+  mutate(monat_index=as.integer(format(monat,"%m"))-6L,
+         vorzeichen=if_else(differenz_cent_l>=0,
+                            "Deutschland teurer","Deutschland guenstiger"),
+         kraftstoff=factor(kraftstoff,levels=fuels))
+de_gap_labels <- de_gap_summary |>
+  transmute(kraftstoff=factor(kraftstoff,levels=fuels),
+            text=sprintf("Mittel Jul-Sep: %+.2f Cent/L",
+                         durchschnitt_cent_pro_l),x=2,y=7.0)
+de_gap_chart <- ggplot(de_gap_data,
+                       aes(x=monat_index,y=differenz_cent_l)) +
+  geom_hline(yintercept=0,color="#59636e",linewidth=0.45) +
+  geom_col(aes(fill=vorzeichen),width=0.68) +
+  geom_text(aes(label=sprintf("%+.2f",differenz_cent_l)),
+            vjust=if_else(de_gap_data$differenz_cent_l>=0,-0.35,1.35),
+            size=3.7,color="#1b2634") +
+  geom_text(data=de_gap_labels,aes(x=x,y=y,label=text),
+            inherit.aes=FALSE,hjust=0.5,size=4.1,color="#1b2634") +
+  facet_wrap(~kraftstoff,ncol=1) +
+  scale_fill_manual(values=c("Deutschland teurer"="#c44636",
+                             "Deutschland guenstiger"="#547991")) +
+  scale_x_continuous(breaks=1:3,labels=c("Juli","August","September"),
+                     limits=c(0.45,3.55)) +
+  scale_y_continuous(limits=c(-2.0,8.0),breaks=seq(-2,8,2),
+                     expand=expansion(mult=c(0,0))) +
+  labs(title="Nettopreisdifferenz: Deutschland minus synthetischer Vergleich",
+       subtitle="Super 95 und Diesel · Juli bis September 2026 · Positive Werte: Deutschland teurer",
+       x=NULL,y="Differenz (Cent/Liter)",fill=NULL,
+       caption=paste(
+         "Hügel: etwa Februar bis Juni 2026. Juli-September: drei abgeschlossene Monate.",
+         "September enthält alle vier Montagstermine bis 28. September.",
+         "Das Mittel ist die vorzeichenbehaftete Summe der Monatsabstände geteilt durch drei.",
+         "Kein kausaler Preiseffekt und kein verbrauchsgewichteter Ausgabenbetrag.",
+         sep="\n")) +
+  social_theme +
+  theme(plot.caption=element_text(hjust=0,size=9.5))
+ggsave("plots/DE_04_preisabstand_juli_september_2026.png",
+       de_gap_chart,width=10.5,height=8.5,dpi=180,bg="white")
+print(de_gap_chart)
+```
+
+## Österreich: Gewichte bis Dezember 2010
+
+Die Vergleichsländer werden hier nur nach vollständigen Preisen von 2005 bis 2015 ausgewählt. Bulgarien, Rumänien und Kroatien fallen wegen früher Lücken heraus. Die 23 verbleibenden Länder wurden nicht einzeln auf eigene Eingriffe geprüft. Ab Januar 2011 änderte Österreich den erlaubten Erhöhungszeitpunkt auf 12 Uhr; eine Einmal-pro-Tag-Regel galt bereits seit 2009.
+
+```{r oesterreich-gewichte}
+at_months <- seq(as.Date("2005-01-01"),as.Date("2015-12-01"),by="month")
+at_coverage <- preise |>
+  filter(monat %in% at_months) |>
+  group_by(iso2,land,kraftstoff) |>
+  summarise(monate_mit_preis=sum(!is.na(netto_eur_l)),.groups="drop") |>
+  complete(nesting(iso2,land),kraftstoff=fuels,
+           fill=list(monate_mit_preis=0L)) |>
+  group_by(iso2,land) |>
+  summarise(mindestens_vorhanden=min(monate_mit_preis),.groups="drop") |>
+  arrange(iso2)
+at_donors <- at_coverage |>
+  filter(iso2!="AT",mindestens_vorhanden==length(at_months)) |>
+  pull(iso2)
+stopifnot(nrow(at_coverage)==27L,length(at_donors)==23L,
+          setequal(at_coverage$iso2[at_coverage$mindestens_vorhanden<132],
+                   c("BG","RO","HR")))
+at_main <- setNames(lapply(fuels,function(fuel) {
+  fit_synth("AT",at_donors,fuel,"2005-01-01","2010-12-01",
+            "2015-12-01",annual_periods(2005,2010))
+}),fuels)
+at_weights <- bind_rows(lapply(fuels,function(fuel) {
+  tibble(kraftstoff=fuel,iso2=at_donors,
+         land=at_coverage$land[match(at_donors,at_coverage$iso2)],
+         gewicht=unname(at_main[[fuel]]$weights[at_donors]),
+         prozent=100*gewicht)
+}))
+stopifnot(abs(at_main[["Super 95"]]$rmse*100-1.77)<0.01,
+          abs(at_main[["Diesel"]]$rmse*100-1.04)<0.01)
+at_weight_order <- at_weights |>
+  group_by(iso2,land) |>
+  summarise(max_prozent=max(prozent),.groups="drop") |>
+  arrange(desc(max_prozent),land)
+at_weights_plot <- at_weights |>
+  mutate(land=factor(land,levels=at_weight_order$land),
+         label=case_when(
+           prozent>=8 ~ paste0(land,"\n",sprintf("%.1f",prozent)," %"),
+           prozent>=5 ~ paste0(sprintf("%.1f",prozent)," %"),
+           TRUE ~ ""))
+at_shown <- at_weights |> filter(prozent>=5) |>
+  distinct(land) |> pull(land) |> as.character()
+at_palette <- setNames(grDevices::hcl.colors(nrow(at_weight_order),"Set 3"),
+                       at_weight_order$land)
+at_weight_chart <- ggplot(at_weights_plot,
+                          aes(x=kraftstoff,y=prozent,fill=land)) +
+  geom_col(width=0.55) +
+  geom_text(aes(label=label),position=position_stack(vjust=0.5),
+            size=3.3,lineheight=0.9,colour="#202020") +
+  coord_flip() +
+  scale_y_continuous(limits=c(0,100.01),breaks=seq(0,100,20),
+                     expand=expansion(mult=c(0,0))) +
+  scale_fill_manual(values=at_palette,breaks=at_shown,drop=TRUE) +
+  labs(title="Ländergewichte des synthetischen Österreichs nach Kraftstoff",
+       subtitle="Gewichtsschätzung mit Nettopreisen von Januar 2005 bis Dezember 2010",
+       x=NULL,y="Gewicht am Vergleichspreis (%)",fill="Land",
+       caption="Gewichte am synthetischen Nettopreis, keine Marktanteile. 23 Länder mit vollständigen Daten; kleine Gewichte unter 5 % nicht einzeln in der Legende.") +
+  social_theme +
+  theme(panel.grid.major.y=element_blank(),
+        legend.text=element_text(size=10)) +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE))
+ggsave("plots/AT_01_laendergewichte_stacked.png",at_weight_chart,
+       width=12,height=6.5,dpi=180,bg="white")
+print(at_weight_chart)
+```
+
+## Österreich: zurückgehaltenes Jahr 2010
+
+Die Testgewichte werden nur mit 2005–2009 geschätzt. Das gesamte Jahr 2010 wird anschließend ohne erneute Anpassung mit den zeitgleichen Preisen der Vergleichsländer berechnet.
+
+```{r oesterreich-test}
+at_holdout <- setNames(lapply(fuels,function(fuel) {
+  fit_synth("AT",at_donors,fuel,"2005-01-01","2009-12-01",
+            "2010-12-01",annual_periods(2005,2009))
+}),fuels)
+at_holdout_path <- bind_rows(lapply(at_holdout,`[[`,"path")) |>
+  mutate(phase=if_else(monat<=as.Date("2009-12-01"),
+                       "Training","Testjahr 2010"))
+at_diagnostics <- tibble(
+  kraftstoff=fuels,
+  test_rmse_cent_l=vapply(fuels,function(fuel) {
+    p <- at_holdout_path |>
+      filter(kraftstoff==fuel,phase=="Testjahr 2010")
+    sqrt(mean((100*p$gap)^2))
+  },numeric(1)))
+stopifnot(abs(at_diagnostics$test_rmse_cent_l[1]-1.02)<0.01,
+          abs(at_diagnostics$test_rmse_cent_l[2]-1.50)<0.01)
+at_colors <- c("Tatsächliches Österreich"=blue,
+               "Synthetisches Österreich"=orange)
+at_long_prices <- function(p) {
+  p |>
+    select(kraftstoff,monat,actual,synthetic) |>
+    pivot_longer(cols=c(actual,synthetic),
+                 names_to="serie",values_to="netto_eur_l") |>
+    mutate(serie=recode(serie,
+                        actual="Tatsächliches Österreich",
+                        synthetic="Synthetisches Österreich"),
+           kraftstoff=factor(kraftstoff,levels=fuels))
+}
+at_theme <- social_theme
+at_test_labels <- at_diagnostics |>
+  mutate(kraftstoff=factor(kraftstoff,levels=fuels),
+         text=paste0("Test-RMSE 2010: ",
+                     sprintf("%.2f",test_rmse_cent_l)," ct/L"))
+at_test_chart <- ggplot(at_long_prices(at_holdout_path),
+                        aes(x=monat,y=100*netto_eur_l,colour=serie)) +
+  annotate("rect",xmin=as.Date("2010-01-01"),
+           xmax=as.Date("2010-12-31"),ymin=-Inf,ymax=Inf,
+           fill="#e5edf2",alpha=0.7) +
+  geom_line(linewidth=0.82) +
+  geom_vline(xintercept=as.Date("2010-01-01"),linetype="dashed",
+             colour="#596978") +
+  geom_text(data=at_test_labels,
+            aes(x=as.Date("2005-04-01"),y=Inf,label=text),
+            inherit.aes=FALSE,hjust=0,vjust=1.5,
+            colour="#263747",size=3.5) +
+  facet_wrap(~kraftstoff,ncol=1,scales="free_y") +
+  scale_colour_manual(values=at_colors) +
+  scale_x_date(date_breaks="1 year",date_labels="%Y") +
+  labs(title="Modelltest: Österreich und synthetischer Vergleich",
+       subtitle="Training 2005–2009 · Testjahr 2010 schattiert · RMSE je Kraftstoff im Panel",
+       x=NULL,y="Nettopreis (Cent/Liter)",
+       caption="Gewichte nur aus 2005–2009; Testpreise aus 2010 nicht zum Anpassen verwendet.\nZeitgleiche Vergleichspreise waren bekannt. Monatsmittel der EU-Montagsmeldungen.") +
+  at_theme
+ggsave("plots/AT_02_modelltest_2010.png",at_test_chart,
+       width=12,height=8.5,dpi=180,bg="white")
+print(at_test_chart)
+```
+
+## Österreich: beobachtet gegen synthetisch, 2011–2015
+
+Die Hauptgewichte stammen aus 2005–2010. Die Linie zeigt zur Einordnung bereits die Jahre 2008–2010. Der Fünfjahresabstand ist der einfache Durchschnitt aller 60 Monatsabstände; negatives Vorzeichen bedeutet, dass Österreich unter seinem synthetischen Vergleich lag.
+
+```{r oesterreich-preisvergleich}
+at_main_path <- bind_rows(lapply(at_main,`[[`,"path")) |>
+  mutate(phase=if_else(monat<=as.Date("2010-12-01"),
+                       "Training","2011-2015"))
+at_post_summary <- at_main_path |>
+  filter(phase=="2011-2015") |>
+  group_by(kraftstoff) |>
+  summarise(monate=n(),mittlerer_abstand_cent_l=100*mean(gap),
+            .groups="drop")
+stopifnot(all(at_post_summary$monate==60L),
+  abs(at_post_summary$mittlerer_abstand_cent_l[
+    at_post_summary$kraftstoff=="Super 95"]+3.03)<0.01,
+  abs(at_post_summary$mittlerer_abstand_cent_l[
+    at_post_summary$kraftstoff=="Diesel"]+2.32)<0.01)
+at_plot_path <- at_main_path |>
+  filter(monat>=as.Date("2008-01-01"))
+at_post_labels <- at_post_summary |>
+  mutate(kraftstoff=factor(kraftstoff,levels=fuels),
+         text=paste0("Abstand 2011–2015: ",
+                     sprintf("%+.2f",mittlerer_abstand_cent_l)," ct/L"))
+at_price_chart <- ggplot(at_long_prices(at_plot_path),
+                         aes(x=monat,y=100*netto_eur_l,colour=serie)) +
+  annotate("rect",xmin=as.Date("2011-01-01"),
+           xmax=as.Date("2015-12-31"),ymin=-Inf,ymax=Inf,
+           fill="#e5edf2",alpha=0.45) +
+  geom_line(linewidth=0.85) +
+  geom_vline(xintercept=as.Date("2011-01-01"),
+             linetype="dashed",colour="#596978") +
+  geom_text(data=at_post_labels,
+            aes(x=as.Date("2008-04-01"),y=Inf,label=text),
+            inherit.aes=FALSE,hjust=0,vjust=1.5,
+            colour="#263747",size=3.5) +
+  facet_wrap(~kraftstoff,ncol=1,scales="free_y") +
+  scale_colour_manual(values=at_colors) +
+  scale_x_date(date_breaks="1 year",date_labels="%Y") +
+  labs(title="Nettopreise: Österreich und synthetischer Vergleich, 2008–2015",
+       subtitle="Trainingszeitraum bis 2010 · Vergleichszeitraum 2011–2015 schattiert",
+       x=NULL,y="Nettopreis (Cent/Liter)",
+       caption="Die angegebenen Mittelwerte beruhen auf 60 Monatsdifferenzen von 2011 bis 2015.\nDer Abstand ist keine isolierte kausale Wirkung der Uhrzeitregel.") +
+  at_theme
+ggsave("plots/AT_03_preisvergleich_2008_2015.png",at_price_chart,
+       width=12,height=8.5,dpi=180,bg="white")
+print(at_price_chart)
+```
+
+Der Zusatzplot zerlegt diesen Fünfjahresabstand in Monate. Die Zahl der Monate mit negativem Abstand wird aus den Daten berechnet und nicht geschätzt.
+
+```{r oesterreich-monatsabstand}
+at_gap_data <- at_main_path |>
+  filter(phase=="2011-2015") |>
+  mutate(kraftstoff=factor(kraftstoff,levels=fuels),
+         abstand_cent_l=100*gap)
+at_negative_counts <- at_gap_data |>
+  group_by(kraftstoff) |>
+  summarise(negative_monate=sum(abstand_cent_l<0),.groups="drop")
+at_gap_chart <- ggplot(at_gap_data,
+                       aes(x=monat,y=abstand_cent_l)) +
+  geom_hline(yintercept=0,colour="#596978") +
+  geom_col(aes(fill=abstand_cent_l>0),width=25,show.legend=FALSE) +
+  facet_wrap(~kraftstoff,ncol=1,scales="free_y") +
+  scale_fill_manual(values=c("TRUE"=orange,"FALSE"=teal)) +
+  scale_x_date(date_breaks="1 year",date_labels="%Y") +
+  labs(title="Nettopreisdifferenz: Österreich minus synthetischer Vergleich",
+       subtitle=paste0("2011–2015 · Negativer Abstand: Super 95 ",
+                       at_negative_counts$negative_monate[at_negative_counts$kraftstoff=="Super 95"],
+                       "/60, Diesel ",
+                       at_negative_counts$negative_monate[at_negative_counts$kraftstoff=="Diesel"],
+                       "/60 Monate"),
+       x=NULL,y="Abstand (Cent/Liter)",
+       caption="Beobachtetes minus synthetisches Österreich; unter null = Österreich günstiger.\nMonatliche Nettopreise; keine eindeutig kausale Wirkung der Uhrzeitregel.") +
+  at_theme
+ggsave("plots/AT_04_monatlicher_preisabstand_2011_2015.png",
+       at_gap_chart,width=12,height=7.8,dpi=180,bg="white")
+print(at_gap_chart)
+```
+
+## Ergebnisgrenze
+
+Die Grafiken vergleichen Nettopreise mit modellierten Vergleichsverläufen. Insbesondere in Deutschland liegt der beobachtete Preis bereits im März 2026 über dem synthetischen Preis. Ein Abstand nach Einführung der Regel kann deshalb nicht ohne weitere Prüfung als deren Ursache bezeichnet werden. In Österreich gilt dasselbe für andere Veränderungen um 2011 und für den bereits 2009 begonnenen Eingriff. Die Daten bilden außerdem keine tatsächlich bezahlten Brutto- oder tageszeitlich gewichteten Durchschnittspreise ab.

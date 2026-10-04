@@ -1,0 +1,26 @@
+DATENQUELLE
+
+Europäische Kommission, Weekly Oil Bulletin, historische Datei
+"Price developments 2005 onwards" (Stand 1. Oktober 2026):
+https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en
+
+
+HERLEITUNG VON preise_monatlich.csv
+
+Verwendet wurde das Tabellenblatt "Prices wo taxes" mit den Spalten
+<ISO2>_price_wo_tax_euro95 und <ISO2>_price_wo_tax_diesel.
+Die wöchentlichen Quellenwerte sind EUR je 1000 Liter und wurden durch
+1000 geteilt. Für jeden Kalendermonat ist netto_eur_l das arithmetische
+Mittel der vorhandenen wöchentlichen Meldungen (Montagspreise).
+Nichtpositive oder fehlende Quellwerte wurden als NA behandelt und nicht
+aufgefüllt. Die CSV enthält nur die Monatswerte, Länder, Kraftstoffe und
+Vollständigkeitsangaben, die für die beiden Analysen nötig sind.
+
+Die Datei preise_monatlich.csv enthält für Österreich alle 27 verfügbaren
+Länder von Januar 2005 bis Dezember 2015. Für Deutschland enthält sie
+zusätzlich die 12 im Modell verwendeten Länder von Januar 2019 bis
+September 2026. Nicht benötigte Jahre und Spalten sind nicht enthalten.
+
+Die Wochenmeldung ist kein Durchschnitt aller Tageszeiten oder Verkäufe.
+"Ohne Steuern" bedeutet ohne indirekte Steuern laut EU-Quelle, nicht
+ohne mögliche indirekte Effekte von Steuern oder Subventionen.
