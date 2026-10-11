@@ -66,8 +66,6 @@ social_theme <- theme_minimal(base_size=15) +
                                 margin=margin(b=6)),
         plot.subtitle=element_text(size=12.5,colour="#394B5B",
                                    margin=margin(b=13)),
-        plot.caption=element_text(size=10,colour="#53616D",hjust=0,
-                                  margin=margin(t=14)),
         axis.title=element_text(size=12,colour=ink),
         axis.text=element_text(size=11,colour="#425160"),
         strip.text=element_text(face="bold",size=13,colour=ink),
@@ -175,8 +173,7 @@ de_weight_chart <- ggplot(de_plot_data,
   scale_fill_manual(values=de_palette, breaks=de_shown, drop=TRUE) +
 labs(title="Ländergewichte des synthetischen Deutschlands nach Kraftstoff",
        subtitle="Gewichtsschätzung mit Nettopreisen von Januar 2019 bis März 2026",
-       x=NULL, y="Gewicht am Vergleichspreis (%)", fill="Land",
-       caption="Gewichte am synthetischen Nettopreis, keine Marktanteile. 11 vorläufige Vergleichsländer; keine Wirkungsanalyse.") +
+       x=NULL, y="Gewicht am Vergleichspreis (%)", fill="Land") +
   social_theme +
   theme(panel.grid.major.y=element_blank(), panel.grid.minor=element_blank(),
         legend.text=element_text(size=10)) +
@@ -242,8 +239,7 @@ de_test_chart <- ggplot(de_test_long,
                expand=expansion(mult=c(0,0))) +
   labs(title="Modelltest: Deutschland und synthetischer Vergleich",
        subtitle="Training 2019–2024 · Test Januar 2025 bis März 2026 blau hinterlegt · RMSE je Kraftstoff",
-       x=NULL,y="Nettopreis (EUR/Liter)",color=NULL,linetype=NULL,
-       caption="Training 2019–2024. Testpreise nicht zur Gewichtsschätzung verwendet; zeitgleiche Länderpreise schon.\nBereits vor April 2026 keine perfekte Passung; der Abstand danach ist daher nicht automatisch ein Regeleffekt.") +
+       x=NULL,y="Nettopreis (EUR/Liter)",color=NULL,linetype=NULL) +
   social_theme
 ggsave("plots/DE_02_holdout_preisvergleich.png",de_test_chart,
        width=12,height=8,dpi=180,bg="white")
@@ -286,14 +282,9 @@ de_price_chart <- ggplot(de_long,
   scale_y_continuous(labels=function(x) sprintf("%.2f",x)) +
   labs(title="Nettopreise: Deutschland und synthetischer Vergleich, 2025–2026",
        subtitle="Monatsmittel für Super 95 und Diesel · Vertikale Linie: 1. April 2026",
-       x=NULL,y="Nettopreis (EUR/Liter)",color=NULL,linetype=NULL,
-       caption=paste(
-         "Gewichte aus dem Training bis März 2026; September enthält vier Montagstermine.",
-         "Nach dem Preishügel liegt Super 95 im Juli leicht unter, ab August über dem Vergleich.",
-         "Auch vor der Regel gab es Modellabweichungen. Die Differenz belegt keine kausale Regelwirkung.",
-         sep="\n")) +
+       x=NULL,y="Nettopreis (EUR/Liter)",color=NULL,linetype=NULL) +
   social_theme +
-  theme(plot.caption=element_text(hjust=0,size=9.5),
+  theme(
         axis.text.x=element_text(angle=35,hjust=1))
 ggsave("plots/DE_03_deutschland_vs_synthetisch_2025_2026.png",
        de_price_chart,width=12,height=8.5,dpi=180,bg="white")
@@ -342,15 +333,8 @@ de_gap_chart <- ggplot(de_gap_data,
                      expand=expansion(mult=c(0,0))) +
   labs(title="Nettopreisdifferenz: Deutschland minus synthetischer Vergleich",
        subtitle="Super 95 und Diesel · Juli bis September 2026 · Positive Werte: Deutschland teurer",
-       x=NULL,y="Differenz (Cent/Liter)",fill=NULL,
-       caption=paste(
-         "Hügel: etwa Februar bis Juni 2026. Juli-September: drei abgeschlossene Monate.",
-         "September enthält alle vier Montagstermine bis 28. September.",
-         "Das Mittel ist die vorzeichenbehaftete Summe der Monatsabstände geteilt durch drei.",
-         "Kein kausaler Preiseffekt und kein verbrauchsgewichteter Ausgabenbetrag.",
-         sep="\n")) +
-  social_theme +
-  theme(plot.caption=element_text(hjust=0,size=9.5))
+       x=NULL,y="Differenz (Cent/Liter)",fill=NULL) +
+  social_theme
 ggsave("plots/DE_04_preisabstand_juli_september_2026.png",
        de_gap_chart,width=10.5,height=8.5,dpi=180,bg="white")
 print(de_gap_chart)
@@ -414,8 +398,7 @@ at_weight_chart <- ggplot(at_weights_plot,
   scale_fill_manual(values=at_palette,breaks=at_shown,drop=TRUE) +
   labs(title="Ländergewichte des synthetischen Österreichs nach Kraftstoff",
        subtitle="Gewichtsschätzung mit Nettopreisen von Januar 2005 bis Dezember 2010",
-       x=NULL,y="Gewicht am Vergleichspreis (%)",fill="Land",
-       caption="Gewichte am synthetischen Nettopreis, keine Marktanteile. 23 Länder mit vollständigen Daten; kleine Gewichte unter 5 % nicht einzeln in der Legende.") +
+       x=NULL,y="Gewicht am Vergleichspreis (%)",fill="Land") +
   social_theme +
   theme(panel.grid.major.y=element_blank(),
         legend.text=element_text(size=10)) +
@@ -480,8 +463,7 @@ at_test_chart <- ggplot(at_long_prices(at_holdout_path),
   scale_x_date(date_breaks="1 year",date_labels="%Y") +
   labs(title="Modelltest: Österreich und synthetischer Vergleich",
        subtitle="Training 2005–2009 · Testjahr 2010 schattiert · RMSE je Kraftstoff im Panel",
-       x=NULL,y="Nettopreis (Cent/Liter)",
-       caption="Gewichte nur aus 2005–2009; Testpreise aus 2010 nicht zum Anpassen verwendet.\nZeitgleiche Vergleichspreise waren bekannt. Monatsmittel der EU-Montagsmeldungen.") +
+       x=NULL,y="Nettopreis (Cent/Liter)") +
   at_theme
 ggsave("plots/AT_02_modelltest_2010.png",at_test_chart,
        width=12,height=8.5,dpi=180,bg="white")
@@ -529,8 +511,7 @@ at_price_chart <- ggplot(at_long_prices(at_plot_path),
   scale_x_date(date_breaks="1 year",date_labels="%Y") +
   labs(title="Nettopreise: Österreich und synthetischer Vergleich, 2008–2015",
        subtitle="Trainingszeitraum bis 2010 · Vergleichszeitraum 2011–2015 schattiert",
-       x=NULL,y="Nettopreis (Cent/Liter)",
-       caption="Die angegebenen Mittelwerte beruhen auf 60 Monatsdifferenzen von 2011 bis 2015.\nDer Abstand ist keine isolierte kausale Wirkung der Uhrzeitregel.") +
+       x=NULL,y="Nettopreis (Cent/Liter)") +
   at_theme
 ggsave("plots/AT_03_preisvergleich_2008_2015.png",at_price_chart,
        width=12,height=8.5,dpi=180,bg="white")
@@ -560,8 +541,7 @@ at_gap_chart <- ggplot(at_gap_data,
                        "/60, Diesel ",
                        at_negative_counts$negative_monate[at_negative_counts$kraftstoff=="Diesel"],
                        "/60 Monate"),
-       x=NULL,y="Abstand (Cent/Liter)",
-       caption="Beobachtetes minus synthetisches Österreich; unter null = Österreich günstiger.\nMonatliche Nettopreise; keine eindeutig kausale Wirkung der Uhrzeitregel.") +
+       x=NULL,y="Abstand (Cent/Liter)") +
   at_theme
 ggsave("plots/AT_04_monatlicher_preisabstand_2011_2015.png",
        at_gap_chart,width=12,height=7.8,dpi=180,bg="white")
