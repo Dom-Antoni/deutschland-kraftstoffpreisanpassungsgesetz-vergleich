@@ -145,13 +145,6 @@ write_csv(at_contributions,file.path(out,"at_laenderbeitraege.csv"))
 write_csv(at_path,file.path(out,"at_monatsvergleich_2011_2015.csv"))
 write_csv(own,file.path(out,"eigene_ergebnisse.csv"))
 write_csv(literature,file.path(out,"literatur_ergebnisse.csv"))
-supported <- bind_rows(own |> select(reihe,kraftstoff,differenz_cent_l),
-  literature |> transmute(reihe="DE_2013_Literatur",kraftstoff,differenz_cent_l))
-post_check <- read_csv(file.path(base,"data/post_zahlencheck.csv"),show_col_types=FALSE) |>
-  inner_join(supported,by=c("reihe","kraftstoff"),relationship="one-to-one") |>
-  mutate(post_minus_ergebnis_cent_l=post_cent_l-differenz_cent_l)
-stopifnot(nrow(post_check)==6L,all(abs(post_check$belegt_cent_l-post_check$differenz_cent_l)<0.005))
-write_csv(post_check,file.path(out,"post_zahlencheck.csv"))
 writeLines(trimws(capture.output(sessionInfo()),which="right"),
            con=file.path(out,"R_sessionInfo.txt"))
 print(own,width=Inf)

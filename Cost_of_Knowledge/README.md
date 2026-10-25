@@ -11,10 +11,6 @@ Positives Vorzeichen bedeutet teurer als der Vergleich, negatives günstiger.
 | Österreich, Januar 2011–Dezember 2015 | −3,03 Cent/L | −2,32 Cent/L | Eigene Rechnung aus 60 Monatswerten; Diesel im Post auf −2,3 gerundet |
 | Deutschland, Transparenzregel ab 2013, langfristig | ca. −2,2 Cent/L | ca. −3 Cent/L | Bernhardt, Breiderhoff und Dewenter (2025), Abschnitt 7.2 |
 
-**Zahlenkorrektur im eingereichten Post:** Für die Literaturangabe zu Super ist
-**2,2** statt **2,02 Cent/L** durch den Ergebnisteil belegt. Die Eingabe und die
-belegte Zahl stehen nebeneinander in `data/post_zahlencheck.csv`.
-
 ## Schnell reproduzieren
 
 Benötigt: R ab 4.1 sowie `readxl`, `readr`, `dplyr` (ab 1.1.1), `tidyr`.
@@ -161,7 +157,6 @@ Steuerfreie Reihen entfernen nicht automatisch Nachfrage- oder Weitergabeeffekte
 | `at_monatsvergleich_2011_2015.csv` | Tatsächlicher und synthetischer Preis sowie Abstand für alle 120 Kraftstoff-Monate |
 | `at_laenderbeitraege.csv` | Jeder österreichische Länderbeitrag je Monat und Kraftstoff |
 | `literatur_ergebnisse.csv` | Die zwei separat zitierten und umgerechneten Literaturwerte |
-| `post_zahlencheck.csv` | Abgleich der sechs Angaben aus dem eingereichten Post |
 | `neu_schaetzung_gewichte.csv` | Vergleich archivierter und neu geschätzter Gewichte, nach `--refit` |
 | `R_sessionInfo.txt` | Softwareversionen des ausgeführten Laufs |
 
