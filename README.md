@@ -4,6 +4,11 @@ Die Datei `analyse.Rmd` berechnet synthetische Vergleichspreise für Deutschland
 
 ## Inhalt
 
+Die Zahlen des LinkedIn-Posts zu „Cost of Knowledge“ sind im Unterordner
+[Cost_of_Knowledge](Cost_of_Knowledge/README.md) aufgeschlüsselt: reproduzierbarer
+R-Code, archivierte EU-Daten, Länderbeiträge, Oktober-Update 2026 und getrennte
+Literaturquellen. Dort ist auch dokumentiert, warum die Zeiträume gewählt wurden.
+
 - `analyse.Rmd`: R-Code für Gewichtsschätzung, Modelltest und Grafiken.
 - `preise_monatlich.csv`: monatliche Nettopreise für Super 95 und Diesel.
 - `QUELLE.txt`: Herkunft und Aufbereitung der Preise.
